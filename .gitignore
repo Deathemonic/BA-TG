@@ -1,0 +1,6 @@
+/target
+/.idea
+/crates/batg-flatbuffers/src/flatbuffers
+*.dll
+*.so
+*.dylib

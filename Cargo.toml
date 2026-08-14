@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/batg-builder", "crates/batg-flatbuffers", "crates/batg-pack"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+authors = ["Zinth"]
+
+[workspace.dependencies]
+batg-builder = { path = "crates/batg-builder" }
+
+baad-utils = { git = "https://github.com/Deathemonic/BA-AD", version = "3.0.0" }
+bacy = { git = "https://github.com/Deathemonic/BA-CY", version = "3.3.2" }
+cunnybuffers = { path = "../../CunnyBuffer/crates/cunnybuffers" }
+
+flatbuffers = { version = "25.12.19", features = ["serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"

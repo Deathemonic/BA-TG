@@ -1,0 +1,17 @@
+[package]
+name = "batg-flatbuffers"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bacy = { workspace = true }
+flatbuffers = { workspace = true }
+serde = { workspace = true }
+serde_json = "1"
+thiserror = { workspace = true }
+
+[build-dependencies]
+batg-builder = { workspace = true }

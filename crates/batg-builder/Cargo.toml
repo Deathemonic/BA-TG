@@ -1,0 +1,15 @@
+[package]
+name = "batg-builder"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cunnybuffers = { workspace = true }
+thiserror = { workspace = true }
+
+bumpalo = "3.20"
+heck = "0.5"
+prettyplease = "0.3"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full"] }
