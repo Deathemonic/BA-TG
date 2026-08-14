@@ -7,6 +7,12 @@ on:
     inputs:
       tag:
         type: string
+      region:
+        type: choice
+        required: true
+        options:
+          - japan
+          - global
 
 jobs:
   build:
@@ -32,6 +38,49 @@ jobs:
           repository: ${{ secrets.CUNNYBUFFERS_REPO }}
           token: ${{ secrets.CUNNYBUFFERS_PAT }}
           path: CunnyBuffer
+
+      - name: Fetch and sanitize schema
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          FBS_REPO: ${{ secrets.FBS_REPO }}
+          FBS_TOKEN: ${{ secrets.FBS_REPO_PAT }}
+          FBS_NS_ROOT: ${{ secrets.FBS_NS_ROOT }}
+          REGION: ${{ inputs.region }}
+        run: |
+          if [ "$REGION" = "japan" ]; then
+            BRANCH="japan-android-mx"
+            FILE="Japan.fbs"
+          else
+            BRANCH="global-android-mx"
+            FILE="Global.fbs"
+          fi
+
+          curl -sSL -H "Authorization: token ${FBS_TOKEN}" \
+            "https://raw.githubusercontent.com/${FBS_REPO}/${BRANCH}/${FILE}" \
+            -o raw_schema.fbs
+
+          REGION_CASED=$(echo "$REGION" | sed 's/./\U&/')
+          python3 - "$FBS_NS_ROOT" "$REGION_CASED" raw_schema.fbs BA-TG/schema/table.fbs <<'PY'
+          import re, sys
+          ns_root, region, in_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          prefix = f"{ns_root}.{region}"
+          pattern = re.compile(r"^(\s*namespace\s+)" + re.escape(prefix) + r"(\.[A-Za-z0-9_.]+)?\s*;\s*$")
+          with open(in_path, encoding="utf-8") as f:
+              text = f.read()
+          out_lines = []
+          for line in text.splitlines():
+              m = pattern.match(line)
+              if m:
+                  rest = m.group(2)
+                  if rest:
+                      out_lines.append(f"namespace {rest.lstrip('.')};")
+                  continue
+              out_lines.append(line)
+          result = "\n".join(out_lines)
+          result = re.sub(r"\n{3,}", "\n\n", result)
+          with open(out_path, "w", encoding="utf-8") as f:
+              f.write(result.strip() + "\n")
+          PY
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -62,7 +111,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     env:
-      FLAT_NAME: game-${{ inputs.tag || github.ref_name }}.flat
+      FLAT_NAME: ${{ github.event_name == 'workflow_dispatch' && format('{0}-{1}.flat', inputs.region, inputs.tag) || format('game-{0}.flat', github.ref_name) }}
     permissions:
       contents: write
       actions: read
