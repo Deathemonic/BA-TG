@@ -83,7 +83,11 @@ jobs:
       matrix:
         config:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
           - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
           - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
     steps:
@@ -111,6 +115,21 @@ jobs:
         with:
           targets: ${{ matrix.config.target }}
 
+      - name: Install cross
+        if: matrix.config.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Write Cross.toml
+        if: matrix.config.cross
+        working-directory: BA-TG
+        run: |
+          cat > Cross.toml <<'EOF'
+          [build.env]
+          volumes = ["CUNNYBUFFER"]
+          EOF
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v6
         with:
@@ -122,7 +141,14 @@ jobs:
 
       - name: Build
         working-directory: BA-TG
-        run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+        env:
+          CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
+        run: |
+          if [ "${{ matrix.config.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+          else
+            cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+          fi
 
       - name: Upload
         uses: actions/upload-artifact@v7
@@ -165,7 +191,11 @@ jobs:
         run: |
           cargo run --release -p batg-pack -- pack --output "../$FLAT_NAME" \
             --add x86_64-unknown-linux-gnu ../artifacts/x86_64-unknown-linux-gnu/libbatg_flatbuffers.so \
+            --add aarch64-unknown-linux-gnu ../artifacts/aarch64-unknown-linux-gnu/libbatg_flatbuffers.so \
+            --add x86_64-unknown-linux-musl ../artifacts/x86_64-unknown-linux-musl/libbatg_flatbuffers.so \
+            --add aarch64-unknown-linux-musl ../artifacts/aarch64-unknown-linux-musl/libbatg_flatbuffers.so \
             --add x86_64-pc-windows-msvc ../artifacts/x86_64-pc-windows-msvc/batg_flatbuffers.dll \
+            --add aarch64-pc-windows-msvc ../artifacts/aarch64-pc-windows-msvc/batg_flatbuffers.dll \
             --add x86_64-apple-darwin ../artifacts/x86_64-apple-darwin/libbatg_flatbuffers.dylib \
             --add aarch64-apple-darwin ../artifacts/aarch64-apple-darwin/libbatg_flatbuffers.dylib
           cargo run --release -p batg-pack -- list "../$FLAT_NAME"
