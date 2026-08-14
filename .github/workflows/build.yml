@@ -13,10 +13,70 @@ on:
         options:
           - japan
           - global
+      dry_run:
+        type: boolean
+        default: false
 
 jobs:
+  schema:
+    name: Fetch schema
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and sanitize schema
+        env:
+          FBS_REPO: ${{ secrets.FBS_REPO }}
+          FBS_TOKEN: ${{ secrets.FBS_REPO_PAT }}
+          FBS_NS_ROOT: ${{ secrets.FBS_NS_ROOT }}
+          REGION: ${{ inputs.region }}
+        run: |
+          if [ "$REGION" = "japan" ]; then
+            BRANCH="japan-android-mx"
+            FILE="Japan.fbs"
+          else
+            BRANCH="global-android-mx"
+            FILE="Global.fbs"
+          fi
+
+          curl -sSL -H "Authorization: token ${FBS_TOKEN}" \
+            "https://raw.githubusercontent.com/${FBS_REPO}/${BRANCH}/${FILE}" \
+            -o raw_schema.fbs
+
+          mkdir -p schema
+
+          REGION_CASED=$(echo "$REGION" | sed 's/./\U&/')
+          python3 - "$FBS_NS_ROOT" "$REGION_CASED" raw_schema.fbs schema/table.fbs <<'PY'
+          import re, sys
+          ns_root, region, in_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          prefix = f"{ns_root}.{region}"
+          pattern = re.compile(r"^(\s*namespace\s+)" + re.escape(prefix) + r"(\.[A-Za-z0-9_.]+)?\s*;\s*$")
+          with open(in_path, encoding="utf-8") as f:
+              text = f.read()
+          out_lines = []
+          for line in text.splitlines():
+              m = pattern.match(line)
+              if m:
+                  rest = m.group(2)
+                  if rest:
+                      out_lines.append(f"namespace {rest.lstrip('.')};")
+                  continue
+              out_lines.append(line)
+          result = "\n".join(out_lines)
+          result = re.sub(r"\n{3,}", "\n\n", result)
+          with open(out_path, "w", encoding="utf-8") as f:
+              f.write(result.strip() + "\n")
+          PY
+
+      - name: Upload schema
+        uses: actions/upload-artifact@v7
+        with:
+          name: schema
+          path: schema/table.fbs
+
   build:
     name: Build ${{ matrix.config.target }}
+    needs: [schema]
+    if: always() && (needs.schema.result == 'success' || needs.schema.result == 'skipped')
     runs-on: ${{ matrix.config.os }}
     strategy:
       fail-fast: false
@@ -39,50 +99,12 @@ jobs:
           token: ${{ secrets.CUNNYBUFFERS_PAT }}
           path: CunnyBuffer
 
-      - name: Fetch and sanitize schema
+      - name: Download schema
         if: github.event_name == 'workflow_dispatch'
-        env:
-          FBS_REPO: ${{ secrets.FBS_REPO }}
-          FBS_TOKEN: ${{ secrets.FBS_REPO_PAT }}
-          FBS_NS_ROOT: ${{ secrets.FBS_NS_ROOT }}
-          REGION: ${{ inputs.region }}
-        run: |
-          if [ "$REGION" = "japan" ]; then
-            BRANCH="japan-android-mx"
-            FILE="Japan.fbs"
-          else
-            BRANCH="global-android-mx"
-            FILE="Global.fbs"
-          fi
-
-          curl -sSL -H "Authorization: token ${FBS_TOKEN}" \
-            "https://raw.githubusercontent.com/${FBS_REPO}/${BRANCH}/${FILE}" \
-            -o raw_schema.fbs
-
-          mkdir -p BA-TG/schema
-
-          REGION_CASED=$(echo "$REGION" | sed 's/./\U&/')
-          python3 - "$FBS_NS_ROOT" "$REGION_CASED" raw_schema.fbs BA-TG/schema/table.fbs <<'PY'
-          import re, sys
-          ns_root, region, in_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-          prefix = f"{ns_root}.{region}"
-          pattern = re.compile(r"^(\s*namespace\s+)" + re.escape(prefix) + r"(\.[A-Za-z0-9_.]+)?\s*;\s*$")
-          with open(in_path, encoding="utf-8") as f:
-              text = f.read()
-          out_lines = []
-          for line in text.splitlines():
-              m = pattern.match(line)
-              if m:
-                  rest = m.group(2)
-                  if rest:
-                      out_lines.append(f"namespace {rest.lstrip('.')};")
-                  continue
-              out_lines.append(line)
-          result = "\n".join(out_lines)
-          result = re.sub(r"\n{3,}", "\n\n", result)
-          with open(out_path, "w", encoding="utf-8") as f:
-              f.write(result.strip() + "\n")
-          PY
+        uses: actions/download-artifact@v8
+        with:
+          name: schema
+          path: BA-TG/schema
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -155,7 +177,7 @@ jobs:
           path: ${{ env.FLAT_NAME }}
 
       - name: Release
-        if: github.event_name == 'release' || inputs.tag != ''
+        if: (github.event_name == 'release') || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.dry_run != true)
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
