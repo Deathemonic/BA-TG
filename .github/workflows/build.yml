@@ -83,7 +83,7 @@ jobs:
       matrix:
         config:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
@@ -141,8 +141,10 @@ jobs:
 
       - name: Build
         working-directory: BA-TG
+        shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
+          RUSTFLAGS: ${{ contains(matrix.config.target, 'musl') && '-C target-feature=+crt-static' || '' }}
         run: |
           if [ "${{ matrix.config.cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
