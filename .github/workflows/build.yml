@@ -208,12 +208,25 @@ jobs:
           name: ${{ env.FLAT_NAME }}
           path: ${{ env.FLAT_NAME }}
 
+      - name: Compute release tag
+        if: (github.event_name == 'release') || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.dry_run != true)
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            REGION="${{ inputs.region }}"
+            REGION_CASED=$(echo "$REGION" | sed 's/./\U&/')
+            echo "value=${REGION_CASED}-${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Release
         if: (github.event_name == 'release') || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.dry_run != true)
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.value }}
           files: ${{ env.FLAT_NAME }}
-          generate_release_notes: true
+          body: ""
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
