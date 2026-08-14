@@ -59,6 +59,8 @@ jobs:
             "https://raw.githubusercontent.com/${FBS_REPO}/${BRANCH}/${FILE}" \
             -o raw_schema.fbs
 
+          mkdir -p BA-TG/schema
+
           REGION_CASED=$(echo "$REGION" | sed 's/./\U&/')
           python3 - "$FBS_NS_ROOT" "$REGION_CASED" raw_schema.fbs BA-TG/schema/table.fbs <<'PY'
           import re, sys
