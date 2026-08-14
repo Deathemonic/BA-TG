@@ -1,0 +1,114 @@
+name: Build and Pack
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+
+jobs:
+  build:
+    name: Build ${{ matrix.config.target }}
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
+          - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
+          - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: BA-TG
+
+      - name: Checkout private dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.CUNNYBUFFERS_REPO }}
+          token: ${{ secrets.CUNNYBUFFERS_PAT }}
+          path: CunnyBuffer
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.config.target }}
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            BA-TG/target
+          key: batg-${{ runner.os }}-${{ matrix.config.target }}-${{ hashFiles('BA-TG/Cargo.lock') }}
+
+      - name: Build
+        working-directory: BA-TG
+        run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.config.target }}
+          path: BA-TG/target/${{ matrix.config.target }}/release/${{ matrix.config.artifact }}
+
+  pack:
+    name: Pack
+    needs: [build]
+    runs-on: ubuntu-latest
+    env:
+      FLAT_NAME: game-${{ inputs.tag || github.ref_name }}.flat
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: BA-TG
+
+      - name: Checkout private dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.CUNNYBUFFERS_REPO }}
+          token: ${{ secrets.CUNNYBUFFERS_PAT }}
+          path: CunnyBuffer
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Pack
+        working-directory: BA-TG
+        run: |
+          cargo run --release -p batg-pack -- pack --output "../$FLAT_NAME" \
+            --add x86_64-unknown-linux-gnu ../artifacts/x86_64-unknown-linux-gnu/libbatg_flatbuffers.so \
+            --add x86_64-pc-windows-msvc ../artifacts/x86_64-pc-windows-msvc/batg_flatbuffers.dll \
+            --add x86_64-apple-darwin ../artifacts/x86_64-apple-darwin/libbatg_flatbuffers.dylib \
+            --add aarch64-apple-darwin ../artifacts/aarch64-apple-darwin/libbatg_flatbuffers.dylib
+          cargo run --release -p batg-pack -- list "../$FLAT_NAME"
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.FLAT_NAME }}
+          path: ${{ env.FLAT_NAME }}
+
+      - name: Release
+        if: github.event_name == 'release' || inputs.tag != ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: ${{ env.FLAT_NAME }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
