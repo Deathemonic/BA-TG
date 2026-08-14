@@ -144,7 +144,7 @@ jobs:
         shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
-          RUSTFLAGS: ${{ contains(matrix.config.target, 'musl') && '-C target-feature=+crt-static' || '' }}
+          RUSTFLAGS: ${{ contains(matrix.config.target, 'musl') && '-C target-feature=-crt-static' || '' }}
         run: |
           if [ "${{ matrix.config.cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
