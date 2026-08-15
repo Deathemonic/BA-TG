@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::str;
 
 use crate::error::PackError;
 
@@ -37,7 +38,7 @@ pub fn decode_triple(bytes: &[u8; TRIPLE_LEN]) -> Result<String, PackError> {
     if bytes[end..].iter().any(|&b| b != 0) {
         return Err(PackError::Invalid);
     }
-    let triple = std::str::from_utf8(&bytes[..end])?;
+    let triple = str::from_utf8(&bytes[..end])?;
     if triple.is_empty() {
         return Err(PackError::InvalidTriple);
     }
@@ -52,7 +53,9 @@ where
 {
     writer.write_all(MAGIC)?;
     writer.write_all(&VERSION.to_le_bytes())?;
-    writer.write_all(&(u16::try_from(entries.len()).map_err(|_| PackError::Invalid)?).to_le_bytes())?;
+    writer.write_all(
+        &(u16::try_from(entries.len()).map_err(|_| PackError::Invalid)?).to_le_bytes()
+    )?;
 
     for entry in entries {
         writer.write_all(&encode_triple(&entry.target_triple)?)?;
@@ -98,8 +101,10 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<FlatFile, PackError> {
 fn parse_entry(buf: &[u8; ENTRY_SIZE]) -> Result<Entry, PackError> {
     let triple: [u8; TRIPLE_LEN] = buf[..TRIPLE_LEN].try_into().map_err(|_| PackError::Invalid)?;
     let offset = u64::from_le_bytes(buf[32..40].try_into().map_err(|_| PackError::Invalid)?);
-    let compressed_size = u64::from_le_bytes(buf[40..48].try_into().map_err(|_| PackError::Invalid)?);
-    let uncompressed_size = u64::from_le_bytes(buf[48..56].try_into().map_err(|_| PackError::Invalid)?);
+    let compressed_size =
+        u64::from_le_bytes(buf[40..48].try_into().map_err(|_| PackError::Invalid)?);
+    let uncompressed_size =
+        u64::from_le_bytes(buf[48..56].try_into().map_err(|_| PackError::Invalid)?);
     let checksum = u32::from_le_bytes(buf[56..60].try_into().map_err(|_| PackError::Invalid)?);
 
     Ok(Entry {

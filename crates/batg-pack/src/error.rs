@@ -1,14 +1,16 @@
+use std::io;
 use std::path::PathBuf;
+use std::str::Utf8Error;
 
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PackError {
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
 
     #[error(transparent)]
-    Utf8(#[from] std::str::Utf8Error),
+    Utf8(#[from] Utf8Error),
 
     #[error("Invalid .flat container")]
     Invalid,

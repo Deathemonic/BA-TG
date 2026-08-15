@@ -6,10 +6,12 @@ use bacy::crypto::table;
 use serde::Serialize;
 
 use crate::error::FlatBufferError;
+use crate::sink::{SinkRef, visit_row, visit_table as visit};
 
 include!(concat!(env!("OUT_DIR"), "/tables.rs"));
 
-type Dispatch = fn(&str, &[u8], &mut Vec<u8>) -> Option<Result<(), FlatBufferError>>;
+type Dispatch<O> = fn(&str, &[u8], O) -> Option<Result<(), FlatBufferError>>;
+type Json = fn(&str, &[u8], &mut Vec<u8>) -> Option<Result<(), FlatBufferError>>;
 
 fn to_json<'a, T>(bytes: &'a [u8], out: &mut Vec<u8>) -> Result<(), FlatBufferError>
 where
@@ -18,6 +20,24 @@ where
 {
     let root = flatbuffers::root::<T>(bytes)?;
     Ok(serde_json::to_writer_pretty(out, &root)?)
+}
+
+fn to_sink_table<'a, T>(bytes: &'a [u8], out: &SinkRef) -> Result<(), FlatBufferError>
+where
+    T: flatbuffers::Follow<'a> + flatbuffers::Verifiable + 'a,
+    T::Inner: Serialize
+{
+    let root = flatbuffers::root::<T>(bytes)?;
+    visit(&root, out)
+}
+
+fn to_sink_row<'a, T>(bytes: &'a [u8], out: &SinkRef) -> Result<(), FlatBufferError>
+where
+    T: flatbuffers::Follow<'a> + flatbuffers::Verifiable + 'a,
+    T::Inner: Serialize
+{
+    let root = flatbuffers::root::<T>(bytes)?;
+    visit_row(&root, out)
 }
 
 pub fn resolve_table(filename: &str) -> Option<&'static str> {
@@ -37,18 +57,9 @@ pub fn resolve_row(table_name: &str) -> Option<&'static str> {
     })
 }
 
-fn decode(
-    dispatch: Dispatch,
-    type_name: &str,
-    bytes: &[u8],
-    out: &mut Vec<u8>
-) -> Result<(), FlatBufferError> {
-    let run = AssertUnwindSafe(|| {
-        dispatch(type_name, bytes, out)
-            .unwrap_or_else(|| Err(FlatBufferError::UnknownTable(type_name.to_owned())))
-    });
-
-    catch_unwind(run).unwrap_or_else(|payload| Err(FlatBufferError::Panic(message(&*payload))))
+fn guard<T>(run: impl FnOnce() -> Result<T, FlatBufferError>) -> Result<T, FlatBufferError> {
+    catch_unwind(AssertUnwindSafe(run))
+        .unwrap_or_else(|payload| Err(FlatBufferError::Panic(message(&*payload))))
 }
 
 fn message(payload: &(dyn Any + Send)) -> String {
@@ -59,14 +70,27 @@ fn message(payload: &(dyn Any + Send)) -> String {
         .unwrap_or_else(|| "unknown panic".to_owned())
 }
 
+fn decode<O>(
+    dispatch: Dispatch<O>,
+    type_name: &str,
+    bytes: &[u8],
+    out: O
+) -> Result<(), FlatBufferError> {
+    dispatch(type_name, bytes, out)
+        .unwrap_or_else(|| Err(FlatBufferError::UnknownTable(type_name.to_owned())))
+}
+
 fn finish(buffer: Vec<u8>) -> Result<String, FlatBufferError> {
     String::from_utf8(buffer).map_err(|error| FlatBufferError::Utf8(error.utf8_error()))
 }
 
-fn dump_one(dispatch: Dispatch, type_name: &str, bytes: &[u8]) -> Result<String, FlatBufferError> {
-    let mut out = Vec::new();
-    decode(dispatch, type_name, bytes, &mut out)?;
-    finish(out)
+fn dump_one(dispatch: Json, type_name: &str, bytes: &[u8]) -> Result<String, FlatBufferError> {
+    guard(|| {
+        let mut out = Vec::new();
+        decode(dispatch, type_name, bytes, &mut out)?;
+
+        finish(out)
+    })
 }
 
 pub fn dump_decrypted(table: &str, bytes: &[u8]) -> Result<String, FlatBufferError> {
@@ -98,27 +122,29 @@ pub fn dump_rows<'a>(
     row_type: &str,
     blobs: impl IntoIterator<Item = &'a [u8]>
 ) -> Result<String, FlatBufferError> {
-    let mut out = String::from("[\n");
-    let mut row = Vec::new();
-    let mut empty = true;
+    guard(|| {
+        let mut out = String::from("[\n");
+        let mut row = Vec::new();
+        let mut empty = true;
 
-    for bytes in blobs {
-        row.clear();
-        decode(dispatch_row, row_type, bytes, &mut row)?;
+        for bytes in blobs {
+            row.clear();
+            decode(dispatch_row, row_type, bytes, &mut row)?;
 
-        if !empty {
-            out.push_str(",\n");
+            if !empty {
+                out.push_str(",\n");
+            }
+            indent(&mut out, str::from_utf8(&row)?);
+            empty = false;
         }
-        indent(&mut out, str::from_utf8(&row)?);
-        empty = false;
-    }
 
-    if empty {
-        return Ok("[]".into());
-    }
+        if empty {
+            return Ok("[]".into());
+        }
 
-    out.push_str("\n]");
-    Ok(out)
+        out.push_str("\n]");
+        Ok(out)
+    })
 }
 
 fn indent(out: &mut String, json: &str) {
@@ -129,4 +155,28 @@ fn indent(out: &mut String, json: &str) {
         out.push_str("  ");
         out.push_str(line);
     }
+}
+
+pub fn visit_decrypted(table: &str, bytes: &[u8], out: &SinkRef) -> Result<(), FlatBufferError> {
+    guard(|| decode(visit_table_type, table, bytes, out))
+}
+
+pub fn visit_table(table: &str, bytes: &mut [u8], out: &SinkRef) -> Result<(), FlatBufferError> {
+    table::xor(table, bytes);
+
+    visit_decrypted(table, bytes, out)
+}
+
+pub fn visit_rows<'a>(
+    row_type: &str,
+    blobs: impl IntoIterator<Item = &'a [u8]>,
+    out: &SinkRef
+) -> Result<(), FlatBufferError> {
+    guard(|| {
+        for bytes in blobs {
+            decode(visit_row_type, row_type, bytes, out)?;
+        }
+
+        Ok(())
+    })
 }

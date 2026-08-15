@@ -3,8 +3,19 @@ use std::fmt::Display;
 use std::os::raw::{c_char, c_int};
 use std::{ptr, slice};
 
-use crate::dump::{dump, dump_decrypted, dump_row, dump_rows, resolve_row, resolve_table};
+use crate::dump::{
+    dump,
+    dump_decrypted,
+    dump_row,
+    dump_rows,
+    resolve_row,
+    resolve_table,
+    visit_decrypted,
+    visit_rows,
+    visit_table
+};
 use crate::error::FlatBufferError;
+use crate::sink::{self, Sink, SinkRef};
 
 #[repr(C)]
 pub struct FfiResult {
@@ -35,6 +46,18 @@ impl FfiResult {
 
     fn from(result: Result<String, FlatBufferError>) -> Self {
         result.map_or_else(Self::err, Self::ok)
+    }
+
+    fn done() -> Self {
+        Self {
+            json: ptr::null_mut(),
+            error: ptr::null_mut(),
+            success: 1
+        }
+    }
+
+    fn from_unit(result: Result<(), FlatBufferError>) -> Self {
+        result.map_or_else(Self::err, |()| Self::done())
     }
 }
 
@@ -141,6 +164,99 @@ pub unsafe extern "C" fn baax_dump_rows(
 
     match rows {
         Ok(rows) => FfiResult::from(dump_rows(row_type, rows)),
+        Err(error) => FfiResult::err(error)
+    }
+}
+
+unsafe fn borrow_sink(sink: *const Sink) -> Result<SinkRef, FlatBufferError> {
+    unsafe { SinkRef::new(sink) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn baax_sink_version() -> u32 { sink::SINK_VERSION }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn baax_sink_size() -> u32 { sink::size() }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn baax_visit_table(
+    table: *const c_char,
+    bytes: *mut u8,
+    len: usize,
+    sink: *const Sink
+) -> FfiResult {
+    let Some(table) = (unsafe { borrow(table) }) else {
+        return FfiResult::err("invalid type name");
+    };
+    if bytes.is_null() {
+        return FfiResult::err("invalid buffer");
+    }
+
+    let sink = match unsafe { borrow_sink(sink) } {
+        Ok(sink) => sink,
+        Err(error) => return FfiResult::err(error)
+    };
+
+    let bytes = unsafe { slice::from_raw_parts_mut(bytes, len) };
+    FfiResult::from_unit(visit_table(table, bytes, &sink))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn baax_visit_table_decrypted(
+    table: *const c_char,
+    bytes: *const u8,
+    len: usize,
+    sink: *const Sink
+) -> FfiResult {
+    let Some(table) = (unsafe { borrow(table) }) else {
+        return FfiResult::err("invalid type name");
+    };
+    let Some(bytes) = (unsafe { borrow_bytes(bytes, len) }) else {
+        return FfiResult::err("invalid buffer");
+    };
+
+    let sink = match unsafe { borrow_sink(sink) } {
+        Ok(sink) => sink,
+        Err(error) => return FfiResult::err(error)
+    };
+
+    FfiResult::from_unit(visit_decrypted(table, bytes, &sink))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn baax_visit_rows(
+    row_type: *const c_char,
+    blobs: *const *const u8,
+    lengths: *const usize,
+    count: usize,
+    sink: *const Sink
+) -> FfiResult {
+    let Some(row_type) = (unsafe { borrow(row_type) }) else {
+        return FfiResult::err("invalid row type");
+    };
+
+    let sink = match unsafe { borrow_sink(sink) } {
+        Ok(sink) => sink,
+        Err(error) => return FfiResult::err(error)
+    };
+
+    if count == 0 {
+        return FfiResult::from_unit(visit_rows(row_type, [], &sink));
+    }
+    if blobs.is_null() || lengths.is_null() {
+        return FfiResult::err("invalid buffers");
+    }
+
+    let blobs = unsafe { slice::from_raw_parts(blobs, count) };
+    let lengths = unsafe { slice::from_raw_parts(lengths, count) };
+    let rows = blobs
+        .iter()
+        .zip(lengths)
+        .map(|(&blob, &len)| unsafe { borrow_bytes(blob, len) }.ok_or("invalid buffer"))
+        .collect::<Result<Vec<_>, _>>();
+
+    match rows {
+        Ok(rows) => FfiResult::from_unit(visit_rows(row_type, rows, &sink)),
         Err(error) => FfiResult::err(error)
     }
 }

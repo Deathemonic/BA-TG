@@ -3,8 +3,8 @@ use std::iter;
 use cunnybuffers::analysis::SchemaAnalysis;
 use cunnybuffers::ir::Schema;
 use heck::ToSnakeCase;
-use proc_macro2::TokenStream;
-use quote::quote;
+use proc_macro2::{Ident, TokenStream};
+use quote::{format_ident, quote};
 use syn::Path as TypePath;
 
 use crate::error::BuildError;
@@ -12,6 +12,24 @@ use crate::error::BuildError;
 pub struct Entry {
     name: String,
     path: TypePath
+}
+
+struct Dispatcher<'a> {
+    function: Ident,
+    call: Ident,
+    output: &'a TokenStream,
+    entries: &'a [Entry]
+}
+
+impl<'a> Dispatcher<'a> {
+    fn new(function: &str, call: &str, output: &'a TokenStream, entries: &'a [Entry]) -> Self {
+        Self {
+            function: format_ident!("{function}"),
+            call: format_ident!("{call}"),
+            output,
+            entries
+        }
+    }
 }
 
 pub fn collect(
@@ -58,46 +76,58 @@ fn type_path(module: &str, namespace: &str, name: &str) -> Result<TypePath, Buil
 pub fn render(tables: &[Entry], rows: &[Entry]) -> Result<String, BuildError> {
     let table_names = tables.iter().map(|entry| &entry.name);
     let row_names = rows.iter().map(|entry| &entry.name);
-    let table_arms = tables.iter().map(arm);
-    let row_arms = rows.iter().map(arm);
+
+    let json = quote! { &mut Vec<u8> };
+    let sink = quote! { &crate::sink::SinkRef };
+
+    let dispatchers = [
+        Dispatcher::new("dispatch_table", "to_json", &json, tables),
+        Dispatcher::new("dispatch_row", "to_json", &json, rows),
+        Dispatcher::new("visit_table_type", "to_sink_table", &sink, tables),
+        Dispatcher::new("visit_row_type", "to_sink_row", &sink, rows)
+    ];
+    let functions = dispatchers.iter().map(function);
 
     let tokens = quote! {
         pub const TABLE_TYPES: &[&str] = &[#(#table_names),*];
 
-        fn dispatch_table(
-            type_name: &str,
-            bytes: &[u8],
-            out: &mut Vec<u8>
-        ) -> Option<Result<(), FlatBufferError>> {
-            match type_name {
-                #(#table_arms)*
-                _ => None
-            }
-        }
-
         pub const ROW_TYPES: &[&str] = &[#(#row_names),*];
 
-        fn dispatch_row(
-            type_name: &str,
-            bytes: &[u8],
-            out: &mut Vec<u8>
-        ) -> Option<Result<(), FlatBufferError>> {
-            match type_name {
-                #(#row_arms)*
-                _ => None
-            }
-        }
+        #(#functions)*
     };
 
     let file = syn::parse2(tokens)?;
     Ok(prettyplease::unparse(&file))
 }
 
-fn arm(entry: &Entry) -> TokenStream {
+fn function(dispatcher: &Dispatcher<'_>) -> TokenStream {
+    let Dispatcher {
+        function,
+        call,
+        output,
+        entries
+    } = dispatcher;
+    let arms = entries.iter().map(|entry| arm(entry, call));
+
+    quote! {
+        fn #function(
+            type_name: &str,
+            bytes: &[u8],
+            out: #output
+        ) -> Option<Result<(), FlatBufferError>> {
+            match type_name {
+                #(#arms)*
+                _ => None
+            }
+        }
+    }
+}
+
+fn arm(entry: &Entry, call: &Ident) -> TokenStream {
     let name = &entry.name;
     let path = &entry.path;
 
     quote! {
-        #name => Some(to_json::<#path<'_>>(bytes, out)),
+        #name => Some(#call::<#path<'_>>(bytes, out)),
     }
 }
