@@ -16,6 +16,9 @@ on:
       dry_run:
         type: boolean
         default: false
+      override:
+        type: boolean
+        default: false
 
 jobs:
   schema:
@@ -226,7 +229,9 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.value }}
           files: ${{ env.FLAT_NAME }}
-          body: ""
-          generate_release_notes: false
+          body: "‎ "
+          generate_release_notes: ${{ inputs.override != true }}
+          overwrite_files: true
+          append_body: ${{ inputs.override == true }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
