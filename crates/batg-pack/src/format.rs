@@ -28,7 +28,7 @@ pub fn encode_triple(triple: &str) -> Result<[u8; TRIPLE_LEN], PackError> {
         return Err(PackError::InvalidTriple);
     }
 
-    let mut out = [0u8; TRIPLE_LEN];
+    let mut out = [0_u8; TRIPLE_LEN];
     out[..bytes.len()].copy_from_slice(bytes);
     Ok(out)
 }
@@ -69,13 +69,13 @@ where
 }
 
 pub fn read_header<R: Read>(reader: &mut R) -> Result<FlatFile, PackError> {
-    let mut magic = [0u8; 4];
+    let mut magic = [0_u8; 4];
     reader.read_exact(&mut magic)?;
     if &magic != MAGIC {
         return Err(PackError::Invalid);
     }
 
-    let mut short = [0u8; 2];
+    let mut short = [0_u8; 2];
     reader.read_exact(&mut short)?;
     let version = u16::from_le_bytes(short);
     if version != VERSION {
@@ -89,7 +89,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<FlatFile, PackError> {
     }
 
     let mut entries = Vec::with_capacity(count as usize);
-    let mut buf = [0u8; ENTRY_SIZE];
+    let mut buf = [0_u8; ENTRY_SIZE];
     for _ in 0..count {
         reader.read_exact(&mut buf)?;
         entries.push(parse_entry(&buf)?);

@@ -36,7 +36,7 @@ pub fn pack(output: &Path, mut adds: Vec<(String, PathBuf)>) -> Result<(), PackE
     let mut blobs = Vec::with_capacity(adds.len());
     for (target_triple, path) in adds {
         if !path.is_file() {
-            return Err(PackError::NotFound(path.to_owned()));
+            return Err(PackError::NotFound(path));
         }
 
         let raw = fs::read(path)?;
