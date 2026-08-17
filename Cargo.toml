@@ -10,7 +10,7 @@ authors = ["Zinth"]
 [workspace.dependencies]
 batg-builder = { path = "crates/batg-builder" }
 
-baad-utils = { git = "https://github.com/Deathemonic/BA-AD", version = "3.0.0" }
+baad-utils = { git = "https://github.com/Deathemonic/BA-AD", version = "3.1.0", default-features = false, features = ["only_logging"] }
 bacy = { git = "https://github.com/Deathemonic/BA-CY", version = "3.3.2" }
 cunnybuffers = { path = "../CunnyBuffer/crates/cunnybuffers" }
 
