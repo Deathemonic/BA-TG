@@ -13,10 +13,11 @@ on:
         options:
           - japan
           - global
+      commit:
+        type: string
+        required: false
+        default: ""
       dry_run:
-        type: boolean
-        default: false
-      override:
         type: boolean
         default: false
 
@@ -32,6 +33,7 @@ jobs:
           FBS_TOKEN: ${{ secrets.FBS_REPO_PAT }}
           FBS_NS_ROOT: ${{ secrets.FBS_NS_ROOT }}
           REGION: ${{ inputs.region }}
+          COMMIT: ${{ inputs.commit }}
         run: |
           if [ "$REGION" = "japan" ]; then
             BRANCH="japan-android-mx"
@@ -41,8 +43,10 @@ jobs:
             FILE="Global.fbs"
           fi
 
-          curl -sSL -H "Authorization: token ${FBS_TOKEN}" \
-            "https://raw.githubusercontent.com/${FBS_REPO}/${BRANCH}/${FILE}" \
+          REF="${COMMIT:-$BRANCH}"
+
+          curl -sSL --fail -H "Authorization: token ${FBS_TOKEN}" \
+            "https://raw.githubusercontent.com/${FBS_REPO}/${REF}/${FILE}" \
             -o raw_schema.fbs
 
           mkdir -p schema
@@ -85,14 +89,17 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
-          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
-          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
-          - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
-          - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
+          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
+          - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
+          - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true, static: false }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true, static: false }
+          - { os: ubuntu-latest, target: aarch64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
+          - { os: ubuntu-latest, target: armv7-linux-androideabi, artifact: libbatg_flatbuffers.so, cross: true }
+          - { os: ubuntu-latest, target: x86_64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -118,21 +125,6 @@ jobs:
         with:
           targets: ${{ matrix.config.target }}
 
-      - name: Install cross
-        if: matrix.config.cross
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-
-      - name: Write Cross.toml
-        if: matrix.config.cross
-        working-directory: BA-TG
-        run: |
-          cat > Cross.toml <<'EOF'
-          [build.env]
-          volumes = ["CUNNYBUFFER"]
-          EOF
-
       - name: Cache Cargo dependencies
         uses: actions/cache@v6
         with:
@@ -143,17 +135,25 @@ jobs:
           key: batg-${{ runner.os }}-${{ matrix.config.target }}-${{ hashFiles('BA-TG/Cargo.lock') }}
 
       - name: Build
+        if: ${{ !matrix.config.cross }}
         working-directory: BA-TG
         shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
-          RUSTFLAGS: ${{ contains(matrix.config.target, 'musl') && '-C target-feature=-crt-static' || '' }}
-        run: |
-          if [ "${{ matrix.config.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
-          else
-            cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
-          fi
+        run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+
+      - name: Build (Cross)
+        if: ${{ matrix.config.cross }}
+        uses: zijiren233/cargo-cross@v1.5.1
+        env:
+          CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
+        with:
+          command: build
+          targets: ${{ matrix.config.target }}
+          profile: release
+          working-directory: ${{ github.workspace }}/BA-TG
+          package: batg-flatbuffers
+          crt-static: ${{ matrix.config.static }}
 
       - name: Upload
         uses: actions/upload-artifact@v7
@@ -199,6 +199,9 @@ jobs:
             --add aarch64-unknown-linux-gnu ../artifacts/aarch64-unknown-linux-gnu/libbatg_flatbuffers.so \
             --add x86_64-unknown-linux-musl ../artifacts/x86_64-unknown-linux-musl/libbatg_flatbuffers.so \
             --add aarch64-unknown-linux-musl ../artifacts/aarch64-unknown-linux-musl/libbatg_flatbuffers.so \
+            --add aarch64-linux-android ../artifacts/aarch64-linux-android/libbatg_flatbuffers.so \
+            --add armv7-linux-androideabi ../artifacts/armv7-linux-androideabi/libbatg_flatbuffers.so \
+            --add x86_64-linux-android ../artifacts/x86_64-linux-android/libbatg_flatbuffers.so \
             --add x86_64-pc-windows-msvc ../artifacts/x86_64-pc-windows-msvc/batg_flatbuffers.dll \
             --add aarch64-pc-windows-msvc ../artifacts/aarch64-pc-windows-msvc/batg_flatbuffers.dll \
             --add x86_64-apple-darwin ../artifacts/x86_64-apple-darwin/libbatg_flatbuffers.dylib \
@@ -230,8 +233,8 @@ jobs:
           tag_name: ${{ steps.tag.outputs.value }}
           files: ${{ env.FLAT_NAME }}
           body: "‎ "
-          generate_release_notes: ${{ inputs.override != true }}
+          generate_release_notes: false
+          append_body: false
           overwrite_files: true
-          append_body: ${{ inputs.override == true }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
