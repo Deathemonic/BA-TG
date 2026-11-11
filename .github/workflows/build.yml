@@ -142,35 +142,18 @@ jobs:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
         run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
 
-      - name: Install musl-tools
+      - name: Install cargo-zigbuild
         if: ${{ contains(matrix.config.target, 'musl') }}
-        run: |
-          sudo mkdir -p /etc/systemd/resolved.conf.d
-          printf '%s\n' '[Resolve]' 'DNS=1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4' 'FallbackDNS=' \
-            | sudo tee /etc/systemd/resolved.conf.d/ci-dns.conf >/dev/null
-          sudo systemctl restart systemd-resolved || true
+        run: pip3 install --break-system-packages ziglang cargo-zigbuild
 
-          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-            grep -q 'mirrors.edge.kernel.org' /etc/apt/apt-mirrors.txt || \
-              echo -e "http://mirrors.edge.kernel.org/ubuntu/\tpriority:1" \
-                | sudo tee -a /etc/apt/apt-mirrors.txt >/dev/null
-          fi
-
-          sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Build (musl, native runner)
+      - name: Build (musl, zigbuild)
         if: ${{ contains(matrix.config.target, 'musl') }}
         working-directory: BA-TG
         shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
           RUSTFLAGS: -C target-feature=-crt-static
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CC_aarch64_unknown_linux_musl: musl-gcc
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-        run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+        run: cargo zigbuild --release --target ${{ matrix.config.target }} -p batg-flatbuffers
 
       - name: Build (Android, NDK clang)
         if: ${{ contains(matrix.config.target, 'android') }}
