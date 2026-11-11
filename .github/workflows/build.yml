@@ -95,8 +95,8 @@ jobs:
           - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
           - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
           - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true, static: false }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: true, static: false }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
+          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
           - { os: ubuntu-latest, target: aarch64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
           - { os: ubuntu-latest, target: armv7-linux-androideabi, artifact: libbatg_flatbuffers.so, cross: true }
           - { os: ubuntu-latest, target: x86_64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
@@ -135,25 +135,52 @@ jobs:
           key: batg-${{ runner.os }}-${{ matrix.config.target }}-${{ hashFiles('BA-TG/Cargo.lock') }}
 
       - name: Build
-        if: ${{ !matrix.config.cross }}
+        if: ${{ !matrix.config.cross && !contains(matrix.config.target, 'musl') }}
         working-directory: BA-TG
         shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
         run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
 
-      - name: Build (Cross)
-        if: ${{ matrix.config.cross }}
-        uses: zijiren233/cargo-cross@v1.5.1
+      - name: Install musl-tools
+        if: ${{ contains(matrix.config.target, 'musl') }}
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build (musl, native runner)
+        if: ${{ contains(matrix.config.target, 'musl') }}
+        working-directory: BA-TG
+        shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
-        with:
-          command: build
-          targets: ${{ matrix.config.target }}
-          profile: release
-          working-directory: ${{ github.workspace }}/BA-TG
-          package: batg-flatbuffers
-          crt-static: ${{ matrix.config.static }}
+          RUSTFLAGS: -C target-feature=-crt-static
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
+
+      - name: Build (Android, NDK clang)
+        if: ${{ contains(matrix.config.target, 'android') }}
+        working-directory: BA-TG
+        shell: bash
+        env:
+          CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
+        run: |
+          NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          API=24
+          case "${{ matrix.config.target }}" in
+            aarch64-linux-android)   CLANG="aarch64-linux-android$API-clang" ;;
+            armv7-linux-androideabi) CLANG="armv7a-linux-androideabi$API-clang" ;;
+            x86_64-linux-android)    CLANG="x86_64-linux-android$API-clang" ;;
+          esac
+          T="${{ matrix.config.target }}"
+          TU="${T//-/_}"
+          TUU="$(echo "$TU" | tr '[:lower:]' '[:upper:]')"
+          export "CC_$TU=$BIN/$CLANG"
+          export "AR_$TU=$BIN/llvm-ar"
+          export "CARGO_TARGET_${TUU}_LINKER=$BIN/$CLANG"
+          cargo build --release --target "$T" -p batg-flatbuffers
 
       - name: Upload
         uses: actions/upload-artifact@v7
