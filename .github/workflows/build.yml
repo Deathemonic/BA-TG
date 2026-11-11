@@ -25,7 +25,7 @@ jobs:
   schema:
     name: Fetch schema
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Fetch and sanitize schema
         env:
@@ -89,13 +89,13 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
+          - { os: ubuntu-26.04, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
           - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
           - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
           - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
           - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
+          - { os: ubuntu-26.04, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
           - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
           - { os: ubuntu-26.04, target: aarch64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
           - { os: ubuntu-26.04, target: armv7-linux-androideabi, artifact: libbatg_flatbuffers.so, cross: true }
@@ -144,7 +144,20 @@ jobs:
 
       - name: Install musl-tools
         if: ${{ contains(matrix.config.target, 'musl') }}
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+        run: |
+          sudo mkdir -p /etc/systemd/resolved.conf.d
+          printf '%s\n' '[Resolve]' 'DNS=1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4' 'FallbackDNS=' \
+            | sudo tee /etc/systemd/resolved.conf.d/ci-dns.conf >/dev/null
+          sudo systemctl restart systemd-resolved || true
+
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+            grep -q 'mirrors.edge.kernel.org' /etc/apt/apt-mirrors.txt || \
+              echo -e "http://mirrors.edge.kernel.org/ubuntu/\tpriority:1" \
+                | sudo tee -a /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+
+          sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build (musl, native runner)
         if: ${{ contains(matrix.config.target, 'musl') }}
@@ -191,7 +204,7 @@ jobs:
   pack:
     name: Pack
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       FLAT_NAME: ${{ github.event_name == 'workflow_dispatch' && format('{0}-{1}.flat', inputs.region, inputs.tag) || format('game-{0}.flat', github.ref_name) }}
     permissions:
