@@ -1,41 +1,18 @@
-mod error;
-mod format;
-mod list;
-mod pack;
+mod cli {
+    pub mod args;
+    pub mod parse;
+}
 
-use std::path::PathBuf;
+mod container;
+mod error;
+
 use std::process::ExitCode;
 
 use baad_utils::config::{LoggingConfig, init_logging};
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
-#[derive(Parser)]
-#[command(name = "batg-pack")]
-#[command(about = "Pack platform cdylibs into a .flat container")]
-struct Args {
-    #[command(subcommand)]
-    command: Command
-}
-
-#[derive(Subcommand)]
-enum Command {
-    Pack(PackArgs),
-    List(ListArgs)
-}
-
-#[derive(Parser)]
-struct PackArgs {
-    #[arg(short, long)]
-    output: PathBuf,
-
-    #[arg(long, num_args = 2, value_names = ["TRIPLE", "PATH"], required = true)]
-    add: Vec<String>
-}
-
-#[derive(Parser)]
-struct ListArgs {
-    file: PathBuf
-}
+use crate::cli::args::Args;
+use crate::cli::parse;
 
 fn main() -> ExitCode {
     if let Err(error) = init_logging(LoggingConfig::default()) {
@@ -43,22 +20,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let result = match Args::parse().command {
-        Command::Pack(args) => {
-            let mut values = args.add.into_iter();
-            let mut adds = Vec::with_capacity(values.len() / 2);
-            while let Some(triple) = values.next() {
-                if let Some(path) = values.next() {
-                    adds.push((triple, PathBuf::from(path)));
-                }
-            }
-
-            pack::pack(&args.output, adds)
-        }
-        Command::List(args) => list::list(&args.file)
-    };
-
-    match result {
+    match parse::run(Args::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");

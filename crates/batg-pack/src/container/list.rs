@@ -3,8 +3,8 @@ use std::path::Path;
 
 use baad_utils::info;
 
+use crate::container::format;
 use crate::error::PackError;
-use crate::format;
 
 pub fn list(path: &Path) -> Result<(), PackError> {
     let mut file = File::open(path)?;

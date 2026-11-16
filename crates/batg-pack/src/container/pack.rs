@@ -3,8 +3,8 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::container::format::{self, ENTRY_SIZE, Entry, HEADER_SIZE};
 use crate::error::PackError;
-use crate::format::{self, ENTRY_SIZE, Entry, HEADER_SIZE};
 
 struct Blob {
     entry: Entry,
