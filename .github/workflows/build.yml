@@ -22,84 +22,67 @@ on:
         default: false
 
 jobs:
-  schema:
-    name: Fetch schema
-    if: github.event_name == 'workflow_dispatch'
+  setup:
+    name: Setup schema revision
     runs-on: ubuntu-26.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      region: ${{ steps.resolve.outputs.region }}
     steps:
-      - name: Fetch and sanitize schema
+      - name: Resolve schema revision
+        id: resolve
         env:
           FBS_REPO: ${{ secrets.FBS_REPO }}
           FBS_TOKEN: ${{ secrets.FBS_REPO_PAT }}
-          FBS_NS_ROOT: ${{ secrets.FBS_NS_ROOT }}
           REGION: ${{ inputs.region }}
           COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [ "$REGION" = "japan" ]; then
-            BRANCH="japan-android-mx"
-            FILE="Japan.fbs"
-          else
-            BRANCH="global-android-mx"
-            FILE="Global.fbs"
+          : "${FBS_REPO:?Missing FBS_REPO}"
+          : "${FBS_TOKEN:?Missing FBS_REPO_PAT}"
+          if [ -z "$REGION" ]; then
+            case "$RELEASE_TAG" in
+              Japan-*|japan-*) REGION=japan ;;
+              Global-*|global-*) REGION=global ;;
+              *) echo "Release tag must start with Japan- or Global-." >&2; exit 1 ;;
+            esac
           fi
 
-          REF="${COMMIT:-$BRANCH}"
-
-          curl -sSL --fail -H "Authorization: token ${FBS_TOKEN}" \
-            "https://raw.githubusercontent.com/${FBS_REPO}/${REF}/${FILE}" \
-            -o raw_schema.fbs
-
-          mkdir -p schema
-
-          REGION_CASED=$(echo "$REGION" | sed 's/./\U&/')
-          python3 - "$FBS_NS_ROOT" "$REGION_CASED" raw_schema.fbs schema/table.fbs <<'PY'
-          import re, sys
-          ns_root, region, in_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-          prefix = f"{ns_root}.{region}"
-          pattern = re.compile(r"^(\s*namespace\s+)" + re.escape(prefix) + r"(\.[A-Za-z0-9_.]+)?\s*;\s*$")
-          with open(in_path, encoding="utf-8") as f:
-              text = f.read()
-          out_lines = []
-          for line in text.splitlines():
-              m = pattern.match(line)
-              if m:
-                  rest = m.group(2)
-                  if rest:
-                      out_lines.append(f"namespace {rest.lstrip('.')};")
-                  continue
-              out_lines.append(line)
-          result = "\n".join(out_lines)
-          result = re.sub(r"\n{3,}", "\n\n", result)
-          with open(out_path, "w", encoding="utf-8") as f:
-              f.write(result.strip() + "\n")
-          PY
-
-      - name: Upload schema
-        uses: actions/upload-artifact@v7
-        with:
-          name: schema
-          path: schema/table.fbs
+          case "$REGION" in
+            japan) schema_branch=japan-android-mx ;;
+            global) schema_branch=global-android-mx ;;
+            *) echo "Unsupported schema region." >&2; exit 1 ;;
+          esac
+          schema_ref="${COMMIT:-$schema_branch}"
+          schema_ref=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$schema_ref")
+          schema_sha=$(curl -fsSL -H "Authorization: Bearer $FBS_TOKEN" \
+            -H "Accept: application/vnd.github.sha" \
+            "https://api.github.com/repos/$FBS_REPO/commits/$schema_ref")
+          if [[ ! "$schema_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Schema repository did not return a valid commit SHA." >&2
+            exit 1
+          fi
+          printf 'sha=%s\nregion=%s\n' "$schema_sha" "$REGION" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.config.target }}
-    needs: [schema]
-    if: always() && (needs.schema.result == 'success' || needs.schema.result == 'skipped')
+    needs: [setup]
     runs-on: ${{ matrix.config.os }}
     strategy:
       fail-fast: false
       matrix:
         config:
-          - { os: ubuntu-26.04, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
-          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so, cross: false }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
-          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll, cross: false }
-          - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
-          - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib, cross: false }
-          - { os: ubuntu-26.04, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
-          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so, cross: false }
-          - { os: ubuntu-26.04, target: aarch64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
-          - { os: ubuntu-26.04, target: armv7-linux-androideabi, artifact: libbatg_flatbuffers.so, cross: true }
-          - { os: ubuntu-26.04, target: x86_64-linux-android, artifact: libbatg_flatbuffers.so, cross: true }
+          - { os: ubuntu-26.04, target: x86_64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-gnu, artifact: libbatg_flatbuffers.so }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, artifact: batg_flatbuffers.dll }
+          - { os: macos-latest, target: x86_64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
+          - { os: macos-latest, target: aarch64-apple-darwin, artifact: libbatg_flatbuffers.dylib }
+          - { os: ubuntu-26.04, target: x86_64-unknown-linux-musl, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-26.04-arm, target: aarch64-unknown-linux-musl, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-26.04, target: aarch64-linux-android, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-26.04, target: armv7-linux-androideabi, artifact: libbatg_flatbuffers.so }
+          - { os: ubuntu-26.04, target: x86_64-linux-android, artifact: libbatg_flatbuffers.so }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -113,12 +96,21 @@ jobs:
           token: ${{ secrets.CUNNYBUFFERS_PAT }}
           path: CunnyBuffer
 
-      - name: Download schema
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v8
+      - name: Setup Python
+        uses: actions/setup-python@v7
         with:
-          name: schema
-          path: BA-TG/schema
+          python-version: '3.x'
+
+      - name: Fetch schema
+        working-directory: BA-TG
+        shell: bash
+        env:
+          FBS_REPO: ${{ secrets.FBS_REPO }}
+          FBS_TOKEN: ${{ secrets.FBS_REPO_PAT }}
+          FBS_NS_ROOT: ${{ secrets.FBS_NS_ROOT }}
+          REGION: ${{ needs.setup.outputs.region }}
+          SCHEMA_SHA: ${{ needs.setup.outputs.sha }}
+        run: bash .github/scripts/fetch-schema.sh
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -131,52 +123,40 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            BA-TG/target
-          key: batg-${{ runner.os }}-${{ matrix.config.target }}-${{ hashFiles('BA-TG/Cargo.lock') }}
+          key: batg-deps-${{ runner.os }}-${{ matrix.config.target }}-${{ hashFiles('BA-TG/Cargo.lock') }}
 
-      - name: Build
-        if: ${{ !matrix.config.cross && !contains(matrix.config.target, 'musl') }}
-        working-directory: BA-TG
-        shell: bash
-        env:
-          CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
-        run: cargo build --release --target ${{ matrix.config.target }} -p batg-flatbuffers
-
-      - name: Install cargo-zigbuild
+      - name: Setup
         if: ${{ contains(matrix.config.target, 'musl') }}
         run: pip3 install --break-system-packages ziglang cargo-zigbuild
 
-      - name: Build (musl, zigbuild)
-        if: ${{ contains(matrix.config.target, 'musl') }}
+      - name: Build
         working-directory: BA-TG
         shell: bash
         env:
           CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
-          RUSTFLAGS: -C target-feature=-crt-static
-        run: cargo zigbuild --release --target ${{ matrix.config.target }} -p batg-flatbuffers
-
-      - name: Build (Android, NDK clang)
-        if: ${{ contains(matrix.config.target, 'android') }}
-        working-directory: BA-TG
-        shell: bash
-        env:
-          CUNNYBUFFER: ${{ github.workspace }}/CunnyBuffer
+          BUILD_TARGET: ${{ matrix.config.target }}
         run: |
-          NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
-          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          API=24
-          case "${{ matrix.config.target }}" in
-            aarch64-linux-android)   CLANG="aarch64-linux-android$API-clang" ;;
-            armv7-linux-androideabi) CLANG="armv7a-linux-androideabi$API-clang" ;;
-            x86_64-linux-android)    CLANG="x86_64-linux-android$API-clang" ;;
+          cargo_subcommand=build
+          case "$BUILD_TARGET" in
+            *-musl)
+              cargo_subcommand=zigbuild
+              export RUSTFLAGS="-C target-feature=-crt-static"
+              ;;
+            *-android*)
+              ndk_root="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+              ndk_bin="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin"
+              clang_target="$BUILD_TARGET"
+              if [ "$BUILD_TARGET" = "armv7-linux-androideabi" ]; then
+                clang_target=armv7a-linux-androideabi
+              fi
+              clang_path="$ndk_bin/${clang_target}24-clang"
+              target_key="${BUILD_TARGET//-/_}"
+              export "CC_${target_key}=$clang_path"
+              export "AR_${target_key}=$ndk_bin/llvm-ar"
+              export "CARGO_TARGET_${target_key^^}_LINKER=$clang_path"
+              ;;
           esac
-          T="${{ matrix.config.target }}"
-          TU="${T//-/_}"
-          TUU="$(echo "$TU" | tr '[:lower:]' '[:upper:]')"
-          export "CC_$TU=$BIN/$CLANG"
-          export "AR_$TU=$BIN/llvm-ar"
-          export "CARGO_TARGET_${TUU}_LINKER=$BIN/$CLANG"
-          cargo build --release --target "$T" -p batg-flatbuffers
+          cargo "$cargo_subcommand" --release --target "$BUILD_TARGET" -p batg-flatbuffers
 
       - name: Upload
         uses: actions/upload-artifact@v7
@@ -237,7 +217,7 @@ jobs:
           name: ${{ env.FLAT_NAME }}
           path: ${{ env.FLAT_NAME }}
 
-      - name: Compute release tag
+      - name: Create release tag
         if: (github.event_name == 'release') || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.dry_run != true)
         id: tag
         run: |
