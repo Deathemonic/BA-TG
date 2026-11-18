@@ -3,13 +3,23 @@ pub mod error;
 pub mod schema;
 pub mod sync;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::{env, fs};
 
+use better_default::Default;
 use bumpalo::Bump;
 use cunnybuffers::analysis::SchemaAnalysis;
 pub use error::BuildError;
 
+#[derive(Default)]
+#[default(
+    schema_dir: PathBuf::from("schema"),
+    generated_dir: PathBuf::from("src/flatbuffers"),
+    module: "flatbuffers".into(),
+    table_namespace: "FlatData".into(),
+    row_namespace: "MX.Data.Excel".into(),
+    imports: vec!["bacy::table_encryption_service".into()]
+)]
 pub struct Build {
     schema_dir: PathBuf,
     generated_dir: PathBuf,
@@ -17,19 +27,6 @@ pub struct Build {
     table_namespace: String,
     row_namespace: String,
     imports: Vec<String>
-}
-
-impl Default for Build {
-    fn default() -> Self {
-        Self {
-            schema_dir: PathBuf::from("schema"),
-            generated_dir: PathBuf::from("src/flatbuffers"),
-            module: "flatbuffers".into(),
-            table_namespace: "FlatData".into(),
-            row_namespace: "MX.Data.Excel".into(),
-            imports: vec!["bacy::table_encryption_service".into()]
-        }
-    }
 }
 
 impl Build {
@@ -82,8 +79,9 @@ impl Build {
         let rows =
             dispatch::collect(&schema, &analysis, &self.module, &self.row_namespace, |_| true)?;
 
-        let output = Path::new(&env::var("OUT_DIR")?).join("tables.rs");
+        let output = PathBuf::from(env::var("OUT_DIR")?).join("tables.rs");
         fs::write(output, dispatch::render(&tables, &rows)?)?;
+
         Ok(())
     }
 }

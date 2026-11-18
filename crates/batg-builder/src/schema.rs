@@ -33,6 +33,7 @@ pub fn generate(schema: &Schema<'_>, imports: &[String]) -> Vec<GeneratedFile> {
         gen_object_api: false,
         merge_table_excel: true,
         serialize: true,
+        deserialize: false,
         imports: imports.to_vec()
     });
 

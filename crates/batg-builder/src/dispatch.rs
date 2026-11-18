@@ -61,18 +61,6 @@ pub fn collect(
         .collect()
 }
 
-fn type_path(module: &str, namespace: &str, name: &str) -> Result<TypePath, BuildError> {
-    let modules = namespace.split('.').filter(|part| !part.is_empty()).map(str::to_snake_case);
-    let path = iter::once("crate".to_owned())
-        .chain(iter::once(module.to_owned()))
-        .chain(modules)
-        .chain(iter::once(name.to_owned()))
-        .collect::<Vec<_>>()
-        .join("::");
-
-    Ok(syn::parse_str(&path)?)
-}
-
 pub fn render(tables: &[Entry], rows: &[Entry]) -> Result<String, BuildError> {
     let table_names = tables.iter().map(|entry| &entry.name);
     let row_names = rows.iter().map(|entry| &entry.name);
@@ -81,12 +69,12 @@ pub fn render(tables: &[Entry], rows: &[Entry]) -> Result<String, BuildError> {
     let sink = quote! { &crate::sink::SinkRef };
 
     let dispatchers = [
-        Dispatcher::new("dispatch_table", "to_json", &json, tables),
-        Dispatcher::new("dispatch_row", "to_json", &json, rows),
+        Dispatcher::new("unpack_table_type", "to_json", &json, tables),
+        Dispatcher::new("unpack_row_type", "to_json", &json, rows),
         Dispatcher::new("visit_table_type", "to_sink_table", &sink, tables),
         Dispatcher::new("visit_row_type", "to_sink_row", &sink, rows)
     ];
-    let functions = dispatchers.iter().map(function);
+    let functions = dispatchers.iter().map(render_dispatch);
 
     let tokens = quote! {
         pub const TABLE_TYPES: &[&str] = &[#(#table_names),*];
@@ -100,7 +88,19 @@ pub fn render(tables: &[Entry], rows: &[Entry]) -> Result<String, BuildError> {
     Ok(prettyplease::unparse(&file))
 }
 
-fn function(dispatcher: &Dispatcher<'_>) -> TokenStream {
+fn type_path(module: &str, namespace: &str, name: &str) -> Result<TypePath, BuildError> {
+    let modules = namespace.split('.').filter(|part| !part.is_empty()).map(str::to_snake_case);
+    let path = iter::once("crate".to_owned())
+        .chain(iter::once(module.to_owned()))
+        .chain(modules)
+        .chain(iter::once(name.to_owned()))
+        .collect::<Vec<_>>()
+        .join("::");
+
+    Ok(syn::parse_str(&path)?)
+}
+
+fn render_dispatch(dispatcher: &Dispatcher<'_>) -> TokenStream {
     let Dispatcher {
         function,
         call,
@@ -110,7 +110,7 @@ fn function(dispatcher: &Dispatcher<'_>) -> TokenStream {
     let arms = entries.iter().map(|entry| arm(entry, call));
 
     quote! {
-        fn #function(
+        pub fn #function(
             type_name: &str,
             bytes: &[u8],
             out: #output

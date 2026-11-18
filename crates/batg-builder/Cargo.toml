@@ -2,8 +2,10 @@
 name = "batg-builder"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 
 [dependencies]
+better_default = { workspace = true }
 cunnybuffers = { workspace = true }
 thiserror = { workspace = true }
 

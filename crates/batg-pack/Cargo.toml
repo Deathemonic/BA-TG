@@ -2,6 +2,7 @@
 name = "batg-pack"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "batg-pack"

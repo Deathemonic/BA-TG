@@ -1,21 +1,22 @@
-pub mod flatbuffers;
-pub use flatbuffers::*;
-
-pub mod dump;
 pub mod error;
 pub mod ffi;
-pub mod sink;
+pub mod flatbuffers;
+pub mod runtime;
 
-pub use dump::{
-    dump,
-    dump_decrypted,
-    dump_file,
-    dump_row,
-    dump_rows,
+pub use flatbuffers::*;
+pub use runtime::{
+    Cell,
+    Sink,
+    SinkRef,
     resolve_row,
     resolve_table,
+    sink,
+    unpack,
+    unpack_decrypted,
+    unpack_file,
+    unpack_row,
+    unpack_rows,
     visit_decrypted,
     visit_rows,
     visit_table
 };
-pub use sink::{Cell, Sink, SinkRef};

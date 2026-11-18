@@ -136,6 +136,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "batg-builder"
 version = "1.0.0"
 dependencies = [
+ "better_default",
  "bumpalo",
  "cunnybuffers",
  "heck",
@@ -152,6 +153,7 @@ version = "1.0.0"
 dependencies = [
  "bacy",
  "batg-builder",
+ "better_default",
  "flatbuffers",
  "serde",
  "serde_json",

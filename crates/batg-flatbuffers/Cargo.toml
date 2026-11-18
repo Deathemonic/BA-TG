@@ -2,11 +2,13 @@
 name = "batg-flatbuffers"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+better_default = { workspace = true }
 bacy = { workspace = true }
 flatbuffers = { workspace = true }
 serde = { workspace = true }
