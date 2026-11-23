@@ -1,6 +1,8 @@
 name: Build and Pack
 
 on:
+  schedule:
+    - cron: '20 0 * * 2'
   release:
     types: [published]
   workflow_dispatch:
@@ -22,8 +24,28 @@ on:
         default: false
 
 jobs:
+  schedule:
+    name: Queue ${{ matrix.region }} build
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [japan, global]
+    steps:
+      - name: Queue build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_REF: ${{ github.ref_name }}
+          REGION: ${{ matrix.region }}
+        run: gh workflow run build.yml --ref "$BUILD_REF" --field "region=$REGION"
+
   setup:
     name: Setup schema revision
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-26.04
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
@@ -169,7 +191,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-26.04
     env:
-      FLAT_NAME: ${{ github.event_name == 'workflow_dispatch' && format('{0}-{1}.flat', inputs.region, inputs.tag) || format('game-{0}.flat', github.ref_name) }}
+      FLAT_NAME: ${{ github.event_name == 'workflow_dispatch' && (inputs.tag != '' && format('{0}-{1}.flat', inputs.region, inputs.tag) || format('{0}.flat', inputs.region)) || format('game-{0}.flat', github.ref_name) }}
     permissions:
       contents: write
       actions: read
